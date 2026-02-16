@@ -1,0 +1,173 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Sandbux Market (TESTING STAGES v0.3)</title>
+<style>
+body {
+    background: #0b0f1a;
+    color: #eee;
+    font-family: Arial, sans-serif;
+    text-align: center;
+}
+canvas {
+    background: #0f1424;
+    border: 1px solid #333;
+}
+.controls {
+    margin-top: 10px;
+}
+input {
+    width: 80px;
+}
+button {
+    padding: 6px 12px;
+    margin: 5px;
+    cursor: pointer;
+}
+#cooldown {
+    margin-top: 8px;
+    font-size: 14px;
+    color: #aaa;
+}
+</style>
+</head>
+
+<body>
+<h1>Super Garry’s Mod Server</h1>
+<h2>Sandbux Market (TESTING STAGES v0.3)</h2>
+<p>\/\/Changelog\/\/
+<p>fixed market crash bug (you were able to do "-5000" on the console and drop the prices to negatives)
+<p>Current Price: <span id="price">120</span> SBX</p>
+<p>USD conversion: <span id="usdDisplay">0.01</span></p>
+
+<canvas id="chart" width="1000" height="450"></canvas>
+
+<div class="controls">
+    <input type="number" id="amount" min="1" max="500" value="50">
+    <button onclick="buy()">Buy</button>
+    <button onclick="sell()">Sell</button>
+</div>
+
+<div id="cooldown"></div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-app.js";
+import { getDatabase, ref, onValue, runTransaction } from "https://www.gstatic.com/firebasejs/10.7.1/firebase-database.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyB2KKAXLzCoRUk8-i9ELncFmQ2vArCYNMM",
+  authDomain: "super-sandbux.firebaseapp.com",
+  databaseURL: "https://super-sandbux-default-rtdb.firebaseio.com",
+  projectId: "super-sandbux",
+  storageBucket: "super-sandbux.appspot.com",
+  messagingSenderId: "879258529229",
+  appId: "1:879258529229:web:4d83382d6217b10f87a884"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+const marketRef = ref(db, "market");
+
+const canvas = document.getElementById("chart");
+const ctx = canvas.getContext("2d");
+
+let prices = [120];
+let currentPrice = 120;
+let lastTrade = 0;
+let usdPrice = 0.01;
+const COOLDOWN = 60000; // Reset to exactly 1 minute
+
+onValue(marketRef, (snapshot) => {
+    const data = snapshot.val();
+    if (!data) return;
+    prices = data.prices || [120];
+    currentPrice = data.currentPrice || 120;
+    lastTrade = data.lastTrade || 0;
+    usdPrice = data.usdPrice !== undefined ? data.usdPrice : 0.01;
+    
+    document.getElementById("price").innerText = currentPrice.toFixed(2);
+    document.getElementById("usdDisplay").innerText = usdPrice.toFixed(2);
+    draw();
+});
+
+function canTrade() {
+    return Date.now() - lastTrade >= COOLDOWN;
+}
+
+function updateCooldown() {
+    let remaining = COOLDOWN - (Date.now() - lastTrade);
+    if (remaining <= 0) {
+        document.getElementById("cooldown").innerText = "Trading available";
+    } else {
+        let mins = Math.ceil(remaining / 60000);
+        document.getElementById("cooldown").innerText = "Next trade in " + mins + " min";
+    }
+}
+
+window.buy = function() {
+    if (!canTrade()) return;
+    let amt = Math.max(1, Math.min(500, Math.abs(Number(amount.value)) || 1));
+    let nextPrice = currentPrice + (amt * 0.02);
+    let nextUsd = usdPrice + 0.01;
+
+    runTransaction(marketRef, (currentData) => {
+        return { 
+            ...currentData, 
+            currentPrice: nextPrice, 
+            usdPrice: nextUsd,
+            lastTrade: Date.now() 
+        };
+    });
+};
+
+window.sell = function() {
+    if (!canTrade()) return;
+    let amt = Math.max(1, Math.min(500, Math.abs(Number(amount.value)) || 1));
+    let nextPrice = currentPrice - (amt * 0.02);
+    let nextUsd = Math.max(0, usdPrice - 0.01);
+
+    runTransaction(marketRef, (currentData) => {
+        return { 
+            ...currentData, 
+            currentPrice: nextPrice, 
+            usdPrice: nextUsd,
+            lastTrade: Date.now() 
+        };
+    });
+};
+
+function draw() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    let max = Math.max(...prices) + 10;
+    let min = Math.min(...prices) - 10;
+    let scale = canvas.height / (max - min);
+    let barWidth = canvas.width / prices.length;
+
+    for (let i = 1; i < prices.length; i++) {
+        let open = prices[i - 1];
+        let close = prices[i];
+        let yOpen = canvas.height - (open - min) * scale;
+        let yClose = canvas.height - (close - min) * scale;
+        let top = Math.min(yOpen, yClose);
+        let height = Math.abs(yClose - yOpen);
+        ctx.fillStyle = close >= open ? "#00ff88" : "#ff3355";
+        ctx.fillRect(i * barWidth, top, barWidth - 1, Math.max(2, height));
+    }
+}
+
+function tick() {
+    runTransaction(marketRef, (data) => {
+        if (!data) return;
+        let newPrices = data.prices || [120];
+        newPrices.push(data.currentPrice);
+        if (newPrices.length > 120) newPrices.shift();
+        return { ...data, prices: newPrices };
+    });
+    updateCooldown();
+}
+
+setInterval(tick, 1000);
+</script>
+</body>
+</html>
